@@ -82,6 +82,90 @@ function showNotify(msg) {
     setTimeout(() => el.classList.add("hidden"), 3000);
 }
 </script>
+    <script>
+let pedidos = JSON.parse(localStorage.getItem("reembolsos") || "[]");
+
+/* SALVAR NO LOCALSTORAGE */
+function salvarPedidos() {
+    localStorage.setItem("reembolsos", JSON.stringify(pedidos));
+}
+
+/* ENVIAR PEDIDO */
+function submitData() {
+    if (!loggedUser) return;
+
+    const pedido = {
+        id: Date.now(),
+        usuario: loggedUser.name,
+        nome: document.getElementById("formNome").value,
+        projeto: document.getElementById("formOS").value,
+        km: document.getElementById("formKM").value,
+        valor: (document.getElementById("formKM").value * 0.85).toFixed(2),
+        status: "Pendente",
+        data: new Date().toLocaleDateString("pt-BR")
+    };
+
+    if (!pedido.nome || !pedido.projeto || !pedido.km) {
+        alert("Preencha os campos obrigatórios");
+        return;
+    }
+
+    pedidos.push(pedido);
+    salvarPedidos();
+    renderUserTable();
+    renderAdminTable();
+
+    alert("Pedido enviado com sucesso!");
+    switchView("view-minhas");
+}
+
+/* HISTÓRICO DO USUÁRIO */
+function renderUserTable() {
+    const tbody = document.getElementById("userTable");
+    const meus = pedidos.filter(p => p.usuario === loggedUser.name);
+
+    tbody.innerHTML = meus.map(p => `
+        <tr>
+            <td class="p-4">#${p.id}</td>
+            <td class="p-4">${p.projeto}</td>
+            <td class="p-4">${p.km} km / R$ ${p.valor}</td>
+            <td class="p-4">${p.status}</td>
+            <td class="p-4">${p.data}</td>
+            <td class="p-4 text-center">—</td>
+        </tr>
+    `).join("") || `
+        <tr>
+            <td colspan="6" class="p-6 text-center text-slate-400">
+                Nenhum pedido ainda
+            </td>
+        </tr>
+    `;
+}
+
+/* TABELA DO ADMIN */
+function renderAdminTable() {
+    if (!loggedUser || !loggedUser.isAdmin) return;
+
+    const tbody = document.getElementById("adminTable");
+    tbody.innerHTML = pedidos.map(p => `
+        <tr>
+            <td class="p-4">#${p.id}</td>
+            <td class="p-4">${p.usuario}</td>
+            <td class="p-4">${p.km} km</td>
+            <td class="p-4">R$ ${p.valor}</td>
+            <td class="p-4">${p.status}</td>
+        </tr>
+    `).join("");
+}
+
+/* AO ENTRAR NO SISTEMA */
+const originalLogin = handleSimpleLogin;
+handleSimpleLogin = function () {
+    originalLogin();
+    renderUserTable();
+    renderAdminTable();
+};
+</script>
 <body class="text-slate-800 antialiased">
 
     <!-- Indicador de Carregamento -->
