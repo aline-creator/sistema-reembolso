@@ -26,6 +26,7 @@
     <script>
 let loggedUser = null;
 
+/* LOGIN */
 function handleSimpleLogin() {
     const user = document.getElementById("loginUser").value.trim();
     if (!user) {
@@ -44,15 +45,41 @@ function handleSimpleLogin() {
 
     if (loggedUser.isAdmin) {
         document.getElementById("btnGestao").classList.remove("hidden");
+    } else {
+        document.getElementById("btnGestao").classList.add("hidden");
     }
 
+    showView("view-inicio");
     document.getElementById("loading").classList.add("hidden");
 }
 
+/* LOGOUT */
 function logout() {
     loggedUser = null;
     document.getElementById("authScreen").classList.remove("hidden");
     document.getElementById("appScreen").classList.add("hidden");
+}
+
+/* NAVEGAÇÃO */
+function showView(viewId) {
+    document.querySelectorAll(".view-section").forEach(v => v.classList.add("hidden"));
+    const el = document.getElementById(viewId);
+    if (el) el.classList.remove("hidden");
+}
+
+/* BOTÕES DO MENU */
+function switchView(viewId, btn) {
+    showView(viewId);
+    document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("nav-active"));
+    if (btn) btn.classList.add("nav-active");
+}
+
+/* NOTIFICAÇÃO */
+function showNotify(msg) {
+    const el = document.getElementById("status");
+    el.innerText = msg;
+    el.classList.remove("hidden");
+    setTimeout(() => el.classList.add("hidden"), 3000);
 }
 </script>
 <body class="text-slate-800 antialiased">
