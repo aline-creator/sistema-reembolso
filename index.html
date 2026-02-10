@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-pt">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -153,7 +153,7 @@
                         </div>
                     </div>
                     <div class="p-8 md:p-10 pt-0 flex flex-col md:flex-row gap-4">
-                        <button onclick="submitData()" id="btnSubmit" class="flex-grow bg-blue-600 text-white font-black py-5 rounded-2xl hover:bg-blue-700 shadow-xl transition active:scale-95 uppercase text-xs tracking-widest text-white">Enviar Solicitação</button>
+                        <button type="button" onclick="submitData()" id="btnSubmit" class="flex-grow bg-blue-600 text-white font-black py-5 rounded-2xl hover:bg-blue-700 shadow-xl transition active:scale-95 uppercase text-xs tracking-widest text-white">Enviar Pedido</button>
                         <button onclick="exportPDF()" class="px-10 py-5 border-2 border-slate-100 text-slate-400 font-black rounded-2xl hover:bg-slate-50 transition uppercase text-xs text-slate-500">Exportar PDF</button>
                     </div>
                     <button id="btnCancelEdit" onclick="cancelEdit()" class="hidden w-full pb-8 text-rose-500 font-black text-[10px] uppercase hover:underline tracking-widest">Descartar Edição</button>
@@ -223,275 +223,161 @@
     </div>
 
     <!-- Scripts Core Firebase -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, onSnapshot, updateDoc, addDoc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+   <script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, doc, collection, onSnapshot, updateDoc, addDoc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'reembolso-v21-no-login';
+/* 🔥 CONFIGURAÇÃO FIREBASE REAL */
+const firebaseConfig = {
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_PROJETO.firebaseapp.com",
+  projectId: "SEU_PROJECT_ID",
+  storageBucket: "SEU_PROJETO.appspot.com",
+  messagingSenderId: "SEU_SENDER_ID",
+  appId: "SEU_APP_ID"
+};
 
-        let allPedidos = [];
-        let currentKmRate = 0.85;
-        let editingDocId = null;
-        let myChart = null;
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-        const retryAuth = async (retries = 5, delay = 1000) => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                if (retries > 0) {
-                    await new Promise(res => setTimeout(res, delay));
-                    return retryAuth(retries - 1, delay * 2);
-                }
-                throw error;
-            }
-        };
+/* 🔑 ID FIXO DO APP */
+const appId = "reembolso-saas";
+       /* =========================
+   VARIÁVEIS GLOBAIS
+========================= */
+let loggedUser = null;
+let pedidos = [];
+let currentKmRate = 0.85;
 
-        // --- INICIALIZAÇÃO DIRETA ---
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                loadData();
-                document.getElementById('loading').classList.add('opacity-0');
-                setTimeout(() => document.getElementById('loading').classList.add('hidden'), 500);
-            }
-        });
+/* =========================
+   REFERÊNCIAS FIRESTORE
+========================= */
+const pedidosRef = collection(db, "pedidos");
+const configRef = doc(db, "config", "global");
 
-        // --- GESTÃO DE DADOS ---
-        function loadData() {
-            if (!auth.currentUser) return;
+/* =========================
+   LOGIN SIMPLES
+========================= */
+window.handleSimpleLogin = function () {
+  const user = loginUser.value.trim();
+  if (!user) return alert("Digite um nome");
 
-            // REGRA 1: Caminhos estritos (6 segmentos para docs)
-            onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'global_rate'), (snap) => {
-                currentKmRate = snap.exists() ? parseFloat(snap.data().kmRate || 0.85) : 0.85;
-                document.getElementById('currentRateLabel').innerText = currentKmRate.toFixed(2);
-                document.getElementById('inputGlobalRate').value = currentKmRate;
-                calc();
-            }, (err) => console.warn("Rate Error:", err));
+  loggedUser = {
+    name: user,
+    isAdmin: user.toLowerCase() === "admin"
+  };
 
-            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reembolsos'), (snap) => {
-                allPedidos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                renderUserTable();
-                renderAdminTable();
-                updateDashboard();
-            }, (err) => console.warn("Data Sync Error:", err));
-        }
+  authScreen.classList.add("hidden");
+  appScreen.classList.remove("hidden");
+  displayUserName.innerText = `Sessão: ${user}`;
+  btnGestao.classList.toggle("hidden", !loggedUser.isAdmin);
 
-        function renderUserTable() {
-            const sorted = [...allPedidos].sort((a,b) => (b.protocolo || "").localeCompare(a.protocolo || ""));
-            document.getElementById('userTable').innerHTML = sorted.map(d => {
-                const procDate = d.dataProcesso ? `<br><span class="text-[8px] text-slate-400 font-bold italic uppercase">Proc: ${formatDateBR(d.dataProcesso)}</span>` : "";
-                const schDate = d.dataAgendamento ? `<br><span class="text-[8px] text-blue-500 font-extrabold italic uppercase">Agendado: ${formatDateBR(d.dataAgendamento)}</span>` : "";
-                
-                return `<tr class="border-b hover:bg-slate-50 transition border-slate-100"><td class="p-6 font-black text-blue-700 tracking-tighter italic">#${d.protocolo}</td><td class="p-6 uppercase text-[9px] leading-relaxed"><b class="block text-slate-800 text-xs">${d.nomeSolicitante || 'Anon'}</b><span class="text-slate-400 font-bold tracking-tight">${d.carroModelo || '---'} (${d.carroAno || '---'}) - ${d.carroPlaca || '---'}</span></td><td class="p-6"><span class="block font-black text-slate-800 text-sm tracking-tight">R$ ${d.valor}</span><span class="text-[9px] text-slate-400 font-black tracking-widest italic">${d.kmTotal} km</span></td><td class="p-6"><span class="px-2 py-1 rounded-full text-[9px] font-black uppercase ${d.status==='Aprovado'?'bg-emerald-100 text-emerald-700':d.status==='Rejeitado'?'bg-rose-100 text-rose-700':'bg-amber-100 text-amber-700'}">${d.status}</span>${procDate}</td><td class="p-6 text-[9px] font-black uppercase ${d.pagamentoStatus==='Pago'?'text-blue-600':d.pagamentoStatus==='Agendado'?'text-sky-500':d.pagamentoStatus==='Cancelado'?'text-rose-400 text-rose-400':'text-slate-300'}">${d.pagamentoStatus || 'Pendente'}${schDate}</td><td class="p-6 text-center text-gray-800"><div class="flex justify-center gap-3"><button onclick="startEditPedido('${d.id}')" class="text-blue-500 hover:scale-125 transition">✏️</button><button onclick="deletePedido('${d.id}')" class="text-rose-500 hover:scale-125 transition ml-2">🗑️</button></div></td></tr>`;
-            }).join('') || '<tr><td colspan="6" class="p-10 text-center text-slate-300 font-black uppercase text-[9px] tracking-widest italic">Nenhum registo na base de dados...</td></tr>';
-        }
+  renderUserTable();
+  renderAdminTable();
+};
 
-        function renderAdminTable() {
-            const sorted = [...allPedidos].sort((a,b) => (b.protocolo || "").localeCompare(a.protocolo || ""));
-            document.getElementById('adminTable').innerHTML = sorted.map(d => `
-                <tr class="border-b hover:bg-slate-50 transition border-slate-100">
-                    <td class="p-6"><span class="font-black text-blue-700 italic tracking-tighter">#${d.protocolo}</span><br><span class="text-[9px] text-gray-400 font-bold uppercase">${formatDateBR(d.dataSolicitacao)}</span></td>
-                    <td class="p-6 uppercase">
-                        <b class="text-xs text-slate-800">${d.nomeSolicitante || 'Desconhecido'}</b><br>
-                        <span class="text-[8px] text-gray-400 font-bold tracking-widest">${d.carroModelo || '---'} (${d.carroAno || '---'}) | ${d.carroPlaca || '---'}</span><br>
-                        <span class="text-[9px] text-indigo-500 font-black bg-indigo-50 px-2 py-0.5 rounded-lg uppercase tracking-tighter mt-1 inline-block">PIX: ${d.pix || '---'}</span>
-                    </td>
-                    <td class="p-6">
-                        <div class="flex flex-col gap-2">
-                            <div class="flex flex-col text-[8px] uppercase font-bold text-slate-400 bg-slate-50 p-1.5 rounded-lg border border-slate-100">
-                                <span>Original: R$ ${parseFloat(d.kmRateOriginal || 0.85).toFixed(2)} / km</span>
-                                <span class="text-blue-600 font-black">Aplicado: R$ ${parseFloat(d.kmRateUsado || 0.85).toFixed(2)} / km</span>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-[9px] font-black uppercase">Novo:</span>
-                                <input type="number" step="0.01" value="${d.kmRateUsado || 0.85}" class="w-16 border rounded-lg p-1 text-[10px] outline-none font-black text-blue-700 bg-white" onchange="recalculatePedido('${d.id}', ${d.kmTotal}, this.value)">
-                            </div>
-                            <span class="text-slate-800 text-xs font-black tracking-tight">TOTAL: R$ ${d.valor} <small class="text-slate-400">(${d.kmTotal}km)</small></span>
-                        </div>
-                    </td>
-                    <td class="p-6 text-gray-800">
-                        ${d.status === 'Pendente' ? `
-                            <div class="flex gap-1">
-                                <button onclick="updateStatus('${d.id}','Aprovado')" class="bg-emerald-500 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase hover:bg-emerald-600 transition shadow-sm text-white">Aprovar</button>
-                                <button onclick="updateStatus('${d.id}','Rejeitado')" class="bg-rose-500 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase hover:bg-rose-600 transition shadow-sm ml-1 text-white">Recusar</button>
-                            </div>
-                        ` : `<span class="text-[9px] font-black uppercase px-2 py-1 rounded-lg ${d.status==='Aprovado'?'text-emerald-600 bg-emerald-50':'text-rose-600 bg-rose-50'}">${d.status} em ${formatDateBR(d.dataProcesso)}</span>`}
-                    </td>
-                    <td class="p-6 text-gray-800">
-                        ${d.status === 'Aprovado' ? `
-                            <div class="flex flex-col gap-2">
-                                <select onchange="savePayment('${d.id}', this.value)" class="text-[9px] font-black border rounded-lg p-2 outline-none bg-white">
-                                    <option value="Pendente" ${d.pagamentoStatus==='Pendente'?'selected':''}>AGUARDAR</option>
-                                    <option value="Agendado" ${d.pagamentoStatus==='Agendado'?'selected':''}>AGENDADO</option>
-                                    <option value="Pago" ${d.pagamentoStatus==='Pago'?'selected':''}>PAGO (PIX)</option>
-                                </select>
-                                <input type="date" id="schDate-${d.id}" value="${d.dataAgendamento || ''}" onchange="saveSchedule('${d.id}', this.value)" class="text-[9px] border rounded-lg p-2 ${d.pagamentoStatus==='Agendado'?'':'hidden'}">
-                            </div>
-                        ` : (d.status==='Rejeitado'?'<span class="text-[9px] text-rose-400 font-black uppercase italic bg-rose-50 px-2 py-1 rounded">CANCELADO</span>':'---')}
-                    </td>
-                </tr>`).join('');
-        }
+/* =========================
+   ENVIAR PEDIDO
+========================= */
+window.submitData = async function () {
+  const km = parseFloat(formKM.value);
 
-        // --- BUSINESS ACTIONS ---
-        window.updateStatus = async (id, s) => {
-            const up = { status: s, dataProcesso: new Date().toISOString().split('T')[0] };
-            if (s === 'Rejeitado') up.pagamentoStatus = 'Cancelado';
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reembolsos', id), up);
-            showNotify(`Solicitação ${s}`);
-        };
+  if (!formOS.value || !km || !formPIX.value) {
+  alert("Preencha os campos obrigatórios");
+  return;
+}
 
-        window.savePayment = async (id, val) => {
-            const updateObj = { pagamentoStatus: val };
-            if(val !== 'Agendado') updateObj.dataAgendamento = ''; 
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reembolsos', id), updateObj);
-            showNotify("Estado financeiro atualizado!");
-        };
+  await addDoc(pedidosRef, {
+    usuario: loggedUser.name,
+    projeto: formOS.value,
+    km,
+    pix: formPIX.value,
+    taxa: currentKmRate,
+    valor: km * currentKmRate,
+    status: "Pendente",
+    criadoEm: new Date()
+  });
 
-        window.saveSchedule = async (id, date) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reembolsos', id), { dataAgendamento: date });
-            showNotify("Data gravada!");
-        };
+  alert("Pedido enviado com sucesso!");
+  switchView("view-minhas");
+};
 
-        window.recalculatePedido = async (id, km, rate) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reembolsos', id), { 
-                kmRateUsado: parseFloat(rate), valor: (km * parseFloat(rate)).toFixed(2) 
-            });
-            showNotify("Recálculo concluído com sucesso!");
-        };
+/* =========================
+   LISTENER TEMPO REAL
+========================= */
+function loadData() {
+  onSnapshot(pedidosRef, (snapshot) => {
+    pedidos = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    renderUserTable();
+    renderAdminTable();
+  });
 
-        window.submitData = async () => {
-            const vals = {
-                nomeSolicitante: document.getElementById('formNome').value.trim(),
-                projetoOS: document.getElementById('formOS').value.trim(),
-                dataViagem: document.getElementById('formData').value,
-                carroModelo: document.getElementById('formModelo').value.trim(),
-                carroAno: document.getElementById('formAno').value.trim(),
-                carroPlaca: document.getElementById('formPlaca').value.trim().toUpperCase(),
-                kmTotal: parseFloat(document.getElementById('formKM').value) || 0,
-                pix: document.getElementById('formPIX').value.trim()
-            };
-            if(!vals.nomeSolicitante || !vals.kmTotal || !vals.carroAno) return showNotify("Preencha todos os campos obrigatórios (*).", "error");
+  onSnapshot(configRef, (docSnap) => {
+    if (docSnap.exists()) {
+      currentKmRate = docSnap.data().kmRate;
+      currentRateLabel.innerText = currentKmRate.toFixed(2);
+    }
+  });
+}
 
-            try {
-                if (editingDocId) {
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reembolsos', editingDocId), { ...vals, valor: (vals.kmTotal * currentKmRate).toFixed(2) });
-                } else {
-                    const now = new Date();
-                    const counterRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'counters');
-                    const counterSnap = await getDoc(counterRef);
-                    let nextProtocol = 26001;
-                    if (counterSnap.exists()) { nextProtocol = (counterSnap.data().lastNum || 26000) + 1; }
-                    
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reembolsos'), {
-                        ...vals, protocolo: nextProtocol.toString(), status: 'Pendente', pagamentoStatus: 'Pendente',
-                        kmRateOriginal: currentKmRate, kmRateUsado: currentKmRate, dataSolicitacao: now.toISOString().split('T')[0],
-                        valor: (vals.kmTotal * currentKmRate).toFixed(2), dataProcesso: '', dataAgendamento: ''
-                    });
-                    await setDoc(counterRef, { lastNum: nextProtocol });
-                }
-                showNotify("Solicitação registada!");
-                cancelEdit(); switchView('view-minhas', document.querySelectorAll('.nav-tab')[2]);
-            } catch (e) { showNotify("Erro ao gravar dados.", "error"); }
-        };
+/* =========================
+   RENDER USUÁRIO
+========================= */
+function renderUserTable() {
+  if (!loggedUser) return;
 
-        window.updateGlobalRate = async () => {
-            const r = parseFloat(document.getElementById('inputGlobalRate').value);
-            if(isNaN(r)) return;
-            try {
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'global_rate'), { kmRate: r });
-                showNotify("Taxa global padrão atualizada!");
-            } catch(e) { showNotify("Acesso negado.", "error"); }
-        };
+  userTable.innerHTML = pedidos
+    .filter(p => p.usuario === loggedUser.name)
+    .map(p => `
+      <tr>
+        <td class="p-4">${p.projeto}</td>
+        <td class="p-4">R$ ${p.valor.toFixed(2)}</td>
+        <td class="p-4">${p.status}</td>
+      </tr>
+    `).join("");
+}
 
-        // --- DASHBOARD ---
-        function updateDashboard() {
-            const paid = allPedidos.filter(d => d.pagamentoStatus === 'Pago').reduce((acc, c) => acc + parseFloat(c.valor || 0), 0);
-            const pend = allPedidos.filter(d => d.status === 'Pendente').length;
-            const km = allPedidos.reduce((acc, c) => acc + parseFloat(c.kmTotal || 0), 0);
-            document.getElementById('statTotal').innerText = `R$ ${paid.toFixed(2)}`;
-            document.getElementById('statPend').innerText = pend;
-            document.getElementById('statKM').innerText = `${km} km`;
-            updateChart(allPedidos);
-        }
+/* =========================
+   RENDER ADMIN
+========================= */
+function renderAdminTable() {
+  if (!loggedUser?.isAdmin) return;
 
-        function updateChart(data) {
-            const recent = data.sort((a,b) => (a.dataSolicitacao || "").localeCompare(b.dataSolicitacao || "")).slice(-8);
-            if (myChart) myChart.destroy();
-            const canvas = document.getElementById('kmChart');
-            if(!canvas) return;
-            myChart = new Chart(canvas.getContext('2d'), {
-                type: 'bar', data: { labels: recent.map(d => "#"+d.protocolo), datasets: [{ label: 'KM', data: recent.map(d => d.kmTotal), backgroundColor: '#2563eb', borderRadius: 8, barThickness: 24 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } } }
-            });
-        }
+  adminTable.innerHTML = pedidos.map(p => `
+    <tr>
+      <td class="p-4">${p.usuario}</td>
+      <td class="p-4">${p.projeto}</td>
+      <td class="p-4">R$ ${p.valor.toFixed(2)}</td>
+      <td class="p-4">${p.status}</td>
+    </tr>
+  `).join("");
+}
 
-        const showNotify = (msg, type) => {
-            const el = document.getElementById('status'); el.innerText = msg;
-            el.classList.remove('hidden', 'bg-slate-900', 'bg-rose-600');
-            el.classList.add(type === 'error' ? 'bg-rose-600' : 'bg-slate-900');
-            setTimeout(() => el.classList.add('hidden'), 3500);
-        };
+/* =========================
+   TAXA GLOBAL
+========================= */
+window.updateGlobalRate = async function () {
+  currentKmRate = parseFloat(inputGlobalRate.value);
+  await setDoc(configRef, { kmRate: currentKmRate });
+  alert("Taxa atualizada");
+};
 
-        window.calc = () => {
-            const km = parseFloat(document.getElementById('formKM').value) || 0;
-            document.getElementById('valCalcDisplay').innerText = `R$ ${(km * currentKmRate).toFixed(2)}`;
-        };
+/* =========================
+   LOGIN ANÔNIMO FIREBASE
+========================= */
+signInAnonymously(auth);
 
-        window.startEditPedido = (id) => {
-            const p = allPedidos.find(x => x.id === id);
-            editingDocId = id;
-            document.getElementById('formTitle').innerText = "Editar Pedido";
-            document.getElementById('formNome').value = p.nomeSolicitante;
-            document.getElementById('formOS').value = p.projetoOS;
-            document.getElementById('formData').value = p.dataViagem;
-            document.getElementById('formModelo').value = p.carroModelo || "";
-            document.getElementById('formAno').value = p.carroAno || "";
-            document.getElementById('formPlaca').value = p.carroPlaca || "";
-            document.getElementById('formKM').value = p.kmTotal;
-            document.getElementById('formPIX').value = p.pix;
-            document.getElementById('btnCancelEdit').classList.remove('hidden');
-            calc(); switchView('view-nova', null);
-        };
-
-        window.cancelEdit = () => {
-            editingDocId = null;
-            document.getElementById('formTitle').innerText = "Nova Solicitação";
-            document.getElementById('btnCancelEdit').classList.add('hidden');
-            ['formNome','formOS','formData','formModelo','formAno','formPlaca','formKM','formPIX'].forEach(f => document.getElementById(f).value = "");
-            calc();
-        };
-
-        window.deletePedido = async (id) => {
-            if(confirm("Confirmar eliminação permanente?")) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reembolsos', id));
-                showNotify("Registo removido.");
-            }
-        };
-
-        window.switchView = (id, btn) => {
-            document.querySelectorAll('.view-section').forEach(v => v.classList.add('hidden'));
-            document.getElementById(id).classList.remove('hidden');
-            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('nav-active'));
-            if (btn && btn.classList.contains('nav-tab')) btn.classList.add('nav-active');
-        };
-
-        const formatDateBR = (s) => { if(!s) return '---'; const p = s.split('-'); return p.length===3 ? `${p[2]}/${p[1]}/${p[0]}` : s; };
-        window.formatFirstLetter = (el) => { if(el.value.length > 0) el.value = el.value.charAt(0).toUpperCase() + el.value.slice(1); };
-        window.exportPDF = () => {
-            const opt = { margin: 10, filename: 'reembolso.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
-            html2pdf().from(document.getElementById('form-to-print')).set(opt).save();
-        };
-
-        // Boot
-        (async () => { try { await retryAuth(); } catch (e) { console.error("Critical Fail"); } })();
-    </script>
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    loadData();
+    document.getElementById("loading").classList.add("hidden");
+  }
+});
+</script>
 </body>
 </html>
