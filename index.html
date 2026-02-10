@@ -23,172 +23,149 @@
         .card-shadow { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05); }
     </style>
 </head>
-   <script>
-/* =========================
-   VARIÁVEIS GLOBAIS
-========================= */
+    <script>
 let loggedUser = null;
-let pedidos = JSON.parse(localStorage.getItem("reembolsos")) || [];
-let protocoloBase = parseInt(localStorage.getItem("protocoloBase") || "26000");
-let currentKmRate = parseFloat(localStorage.getItem("globalRate") || "0.85");
 
-/* =========================
-   LOGIN
-========================= */
+/* LOGIN */
 function handleSimpleLogin() {
-    const user = loginUser.value.trim();
-    if (!user) return alert("Digite um nome");
+    const user = document.getElementById("loginUser").value.trim();
+    if (!user) {
+        alert("Digite um nome");
+        return;
+    }
 
     loggedUser = {
         name: user,
         isAdmin: user.toLowerCase() === "admin"
     };
 
-    authScreen.classList.add("hidden");
-    appScreen.classList.remove("hidden");
-    displayUserName.innerText = `Sessão: ${user}`;
-    btnGestao.classList.toggle("hidden", !loggedUser.isAdmin);
+    document.getElementById("authScreen").classList.add("hidden");
+    document.getElementById("appScreen").classList.remove("hidden");
+    document.getElementById("displayUserName").innerText = `Sessão: ${user}`;
 
-    inputGlobalRate.value = currentKmRate.toFixed(2);
-    calc();
-    renderUserTable();
-    renderAdminTable();
+    if (loggedUser.isAdmin) {
+        document.getElementById("btnGestao").classList.remove("hidden");
+    } else {
+        document.getElementById("btnGestao").classList.add("hidden");
+    }
+
+    showView("view-inicio");
+    document.getElementById("loading").classList.add("hidden");
 }
 
 /* LOGOUT */
 function logout() {
     loggedUser = null;
-    authScreen.classList.remove("hidden");
-    appScreen.classList.add("hidden");
+    document.getElementById("authScreen").classList.remove("hidden");
+    document.getElementById("appScreen").classList.add("hidden");
 }
 
-/* =========================
-   NAVEGAÇÃO
-========================= */
-function switchView(id, btn) {
+/* NAVEGAÇÃO */
+function showView(viewId) {
     document.querySelectorAll(".view-section").forEach(v => v.classList.add("hidden"));
-    document.getElementById(id).classList.remove("hidden");
+    const el = document.getElementById(viewId);
+    if (el) el.classList.remove("hidden");
+}
+
+/* BOTÕES DO MENU */
+function switchView(viewId, btn) {
+    showView(viewId);
     document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("nav-active"));
     if (btn) btn.classList.add("nav-active");
 }
 
-/* =========================
-   CÁLCULO EM TEMPO REAL
-========================= */
-function calc() {
-    const km = parseFloat(formKM.value) || 0;
-    valCalcDisplay.innerText = `R$ ${(km * currentKmRate).toFixed(2)}`;
-    currentRateLabel.innerText = currentKmRate.toFixed(2);
+/* NOTIFICAÇÃO */
+function showNotify(msg) {
+    const el = document.getElementById("status");
+    el.innerText = msg;
+    el.classList.remove("hidden");
+    setTimeout(() => el.classList.add("hidden"), 3000);
+}
+</script>
+    <script>
+let pedidos = JSON.parse(localStorage.getItem("reembolsos") || "[]");
+
+/* SALVAR NO LOCALSTORAGE */
+function salvarPedidos() {
+    localStorage.setItem("reembolsos", JSON.stringify(pedidos));
 }
 
-/* =========================
-   PROTOCOLO
-========================= */
-function gerarProtocolo() {
-    protocoloBase++;
-    localStorage.setItem("protocoloBase", protocoloBase);
-    return protocoloBase;
-}
-
-/* =========================
-   ENVIAR PEDIDO
-========================= */
+/* ENVIAR PEDIDO */
 function submitData() {
-    const km = parseFloat(formKM.value);
-    if (!formNome.value || !formOS.value || !km || !formPIX.value) {
+    if (!loggedUser) return;
+
+    const pedido = {
+        id: Date.now(),
+        usuario: loggedUser.name,
+        nome: document.getElementById("formNome").value,
+        projeto: document.getElementById("formOS").value,
+        km: document.getElementById("formKM").value,
+        valor: (document.getElementById("formKM").value * 0.85).toFixed(2),
+        status: "Pendente",
+        data: new Date().toLocaleDateString("pt-BR")
+    };
+
+    if (!pedido.nome || !pedido.projeto || !pedido.km) {
         alert("Preencha os campos obrigatórios");
         return;
     }
 
-    const protocolo = gerarProtocolo();
-
-    const pedido = {
-        protocolo,
-        data: new Date().toLocaleDateString("pt-BR"),
-        usuario: loggedUser.name,
-        projeto: formOS.value,
-        km,
-        pix: formPIX.value,
-        taxaOriginal: currentKmRate,
-        taxaAtual: currentKmRate,
-        valorOriginal: km * currentKmRate,
-        valorAtual: km * currentKmRate,
-        status: "Pendente"
-    };
-
     pedidos.push(pedido);
-    localStorage.setItem("reembolsos", JSON.stringify(pedidos));
-    
-    alert("Pedido enviado com sucesso!");
-
-renderUserTable();
-renderAdminTable();
-
-switchView("view-minhas", document.querySelector('[onclick*="view-minhas"]'));
-}
-/* =========================
-   GESTOR
-========================= */
-function renderAdminTable() {
-    if (!loggedUser?.isAdmin) return;
-
-    adminTable.innerHTML = pedidos.map((p,i) => `
-        <tr>
-            <td class="p-4 font-black">#${p.protocolo}<br>${p.data}</td>
-            <td class="p-4">${p.usuario}<br><small>PIX: ${p.pix}</small></td>
-            <td class="p-4">
-                <small>Era: R$ ${p.taxaOriginal.toFixed(2)}</small><br>
-                <input type="number" step="0.01" value="${p.taxaAtual.toFixed(2)}"
-                onchange="ajustarTaxa(${i}, this.value)">
-                <br><b>Total: R$ ${p.valorAtual.toFixed(2)}</b>
-            </td>
-            <td class="p-4">${p.status}</td>
-            <td class="p-4">—</td>
-        </tr>
-    `).join("");
-}
-function renderUserTable() {
-    if (!loggedUser) return;
-
-    const tbody = document.getElementById("userTable");
-
-    const meusPedidos = pedidos.filter(p => p.usuario === loggedUser.name);
-
-    tbody.innerHTML = meusPedidos.map(p => `
-        <tr>
-            <td class="p-4 font-black">#${p.protocolo}<br>${p.data}</td>
-            <td class="p-4">${p.projeto}</td>
-            <td class="p-4">R$ ${p.valorAtual.toFixed(2)}</td>
-            <td class="p-4">${p.status}</td>
-        </tr>
-    `).join("");
-}
-/* AJUSTE INDIVIDUAL */
-function ajustarTaxa(index, novaTaxa) {
-    pedidos[index].taxaAtual = parseFloat(novaTaxa);
-    pedidos[index].valorAtual = pedidos[index].km * pedidos[index].taxaAtual;
-    localStorage.setItem("reembolsos", JSON.stringify(pedidos));
-    renderAdminTable();
+    salvarPedidos();
     renderUserTable();
+    renderAdminTable();
+
+    alert("Pedido enviado com sucesso!");
+    switchView("view-minhas");
 }
 
-/* =========================
-   TAXA GLOBAL
-========================= */
-function updateGlobalRate() {
-    currentKmRate = parseFloat(inputGlobalRate.value);
-    localStorage.setItem("globalRate", currentKmRate);
-    calc();
-    alert("Taxa global atualizada");
+/* HISTÓRICO DO USUÁRIO */
+function renderUserTable() {
+    const tbody = document.getElementById("userTable");
+    const meus = pedidos.filter(p => p.usuario === loggedUser.name);
+
+    tbody.innerHTML = meus.map(p => `
+        <tr>
+            <td class="p-4">#${p.id}</td>
+            <td class="p-4">${p.projeto}</td>
+            <td class="p-4">${p.km} km / R$ ${p.valor}</td>
+            <td class="p-4">${p.status}</td>
+            <td class="p-4">${p.data}</td>
+            <td class="p-4 text-center">—</td>
+        </tr>
+    `).join("") || `
+        <tr>
+            <td colspan="6" class="p-6 text-center text-slate-400">
+                Nenhum pedido ainda
+            </td>
+        </tr>
+    `;
 }
 
-<!-- FIREBASE (DESATIVADO POR ENQUANTO) -->
-<!--
-<script type="module">
-   TODO ESSE CÓDIGO FIREBASE
+/* TABELA DO ADMIN */
+function renderAdminTable() {
+    if (!loggedUser || !loggedUser.isAdmin) return;
+
+    const tbody = document.getElementById("adminTable");
+    tbody.innerHTML = pedidos.map(p => `
+        <tr>
+            <td class="p-4">#${p.id}</td>
+            <td class="p-4">${p.usuario}</td>
+            <td class="p-4">${p.km} km</td>
+            <td class="p-4">R$ ${p.valor}</td>
+            <td class="p-4">${p.status}</td>
+        </tr>
+    `).join("");
+}
+
+/* AO ENTRAR NO SISTEMA */
+const originalLogin = handleSimpleLogin;
+handleSimpleLogin = function () {
+    originalLogin();
+    renderUserTable();
+    renderAdminTable();
+};
 </script>
--->
-</body>
 <body class="text-slate-800 antialiased">
 
     <!-- Indicador de Carregamento -->
